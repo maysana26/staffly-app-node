@@ -1,66 +1,85 @@
-let mockProfile = {
-    name: "Sarah Johnson",
-    email: "sarah.johnson@email.com",
-    rating: "4.8",
-    totalEvents: 24,
-    memberSince: "Jan 2024",
-    about: "Experienced event staff with a passion for creating memorable experiences. Specialized in registration management and customer service.",
-    skills: ["Event Coordination", "Customer Service", "Registration Management", "Problem Solving"]
+const db = require("../config/db");
+
+// 1. Explore Available Event Roles
+const getExploreEvents = async (req, res) => {
+    try {
+        const result = await db.query(`
+            SELECT e.event_id, e.title, e.location, e.date, er.role_id, er.role_name, er.slots_needed, er.slots_filled
+            FROM events e
+            JOIN event_roles er ON e.event_id = er.event_id
+            WHERE er.slots_filled < er.slots_needed AND e.date > NOW()
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: "Server error fetching explore feed" });
+    }
 };
 
-let mockRegisteredEvents = [
-    { id: 1, title: "Tech Innovation Summit 2026", role: "Registration Desk Staff", location: "Convention Center, Downtown", date: "May 15, 2026", time: "08:00 AM - 05:00 PM", status: "Confirmed", category: "Technology" },
-    { id: 2, title: "Art Gallery Opening", role: "Reception Staff", location: "Modern Art Museum", date: "May 8, 2026", time: "05:00 PM - 09:00 PM", status: "Confirmed", category: "Arts" }
-];
-
-let mockFeedbackSubmissions = [];
-
-const getExploreEvents = (req, res) => {
-    res.json([
-        { id: 1, title: "Tech Innovation Summit 2026", location: "Convention Center, Downtown", date: "May 15, 2026" },
-        { id: 3, title: "Spring Music Festival", location: "Outdoor Amphitheater", date: "March 15, 2026" }
-    ]);
+// 2. Register / Apply for a specific Role Slot
+const registerForEvent = async (req, res) => {
+    const { roleId, applicantId } = req.body; // Sent from frontend selection
+    try {
+        // Insert application row
+        const appQuery = `
+            INSERT INTO applications (applicant_id, role_id, status)
+            VALUES ($1, $2, 'Pending') RETURNING *
+        `;
+        const result = await db.query(appQuery, [applicantId, roleId]);
+        res.status(201).json({ message: "Application submitted successfully to database!", registration: result.rows[0] });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: "Server error during role registration" });
+    }
 };
 
-const registerForEvent = (req, res) => {
-    const eventId = parseInt(req.params.eventId);
-    const newRegistration = {
-        id: mockRegisteredEvents.length + 1,
-        title: req.body.title || "Custom Event Assignment",
-        role: req.body.role || "General Volunteer",
-        location: req.body.location || "Assigned Location",
-        date: req.body.date || "TBD",
-        time: "Flexible Shifts",
-        status: "Pending",
-        category: req.body.category || "General"
-    };
-    mockRegisteredEvents.push(newRegistration);
-    res.status(201).json({ message: "Application submitted successfully!", registration: newRegistration });
+// 3. Get Applicant's Registered Shifts (With 48-Hour Lock-in Check!)
+const getMyEvents = async (req, res) => {
+    const applicantId = req.query.applicantId;
+    try {
+        const queryText = `
+            SELECT a.application_id, e.title, er.role_name as "role", e.location, e.date, a.status,
+                   (e.date - NOW() > INTERVAL '48 hours') AS "canCancel"
+            FROM applications a
+            JOIN event_roles er ON a.role_id = er.role_id
+            JOIN events e ON er.event_id = e.event_id
+            WHERE a.applicant_id = $1
+        `;
+        const result = await db.query(queryText, [applicantId]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: "Server error fetching registered events" });
+    }
 };
 
-const getMyEvents = (req, res) => {
-    res.json(mockRegisteredEvents);
+// 4. Fetch Profile Page Info
+const getProfile = async (req, res) => {
+    const email = req.query.email;
+    try {
+        const result = await db.query("SELECT name, email, role, rating, total_events, member_since, about, skills FROM users WHERE email = $1", [email]);
+        if (result.rows.length === 0) return res.status(404).json({ message: "Profile not found" });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: "Server error fetching profile" });
+    }
 };
 
-const getProfile = (req, res) => {
-    res.json(mockProfile);
+// 5. Submit Admin-to-Applicant Performance Feedback
+const submitFeedback = async (req, res) => {
+    const { eventId, adminId, applicantId, ratingScore, comment, points } = req.body;
+    try {
+        const queryText = `
+            INSERT INTO feedback (event_id, admin_id, applicant_id, rating_score, experience_comment, points_awarded)
+            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
+        `;
+        const result = await db.query(queryText, [eventId, adminId, applicantId, ratingScore, comment, points]);
+        res.status(201).json({ message: "Feedback performance tracking updated successfully.", data: result.rows[0] });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: "Server error saving evaluation metrics" });
+    }
 };
 
-const submitFeedback = (req, res) => {
-    const newFeedback = {
-        id: mockFeedbackSubmissions.length + 1,
-        rating_score: req.body.rating_score,
-        experience_comment: req.body.experience_comment,
-        submitted_at: new Date()
-    };
-    mockFeedbackSubmissions.push(newFeedback);
-    res.status(201).json({ message: "Feedback captured successfully.", data: newFeedback });
-};
-
-module.exports = {
-    getExploreEvents,
-    registerForEvent,
-    getMyEvents,
-    getProfile,
-    submitFeedback
-};
+module.exports = { getExploreEvents, registerForEvent, getMyEvents, getProfile, submitFeedback };

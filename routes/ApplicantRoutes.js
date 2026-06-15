@@ -11,7 +11,7 @@ router.post("/signup", authController.signup);
 
 // Private Applicant Endpoints
 router.get("/explore-events", applicantController.getExploreEvents);
-router.post("/register/:eventId", applicantController.registerForEvent);
+router.post("/register", applicantController.registerForEvent);
 router.get("/myevents", applicantController.getMyEvents);
 router.get("/profile", applicantController.getProfile);
 router.post("/feedback", applicantController.submitFeedback);
