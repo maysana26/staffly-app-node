@@ -1,4 +1,5 @@
 const db = require("../config/db"); // Import our database connection pool
+const jwt = require("jsonwebtoken"); // Added for signing secure session payloads
 
 // 1. SIGNUP CONTROLLER
 const signup = async (req, res) => {
@@ -42,9 +43,19 @@ const login = async (req, res) => {
         );
 
         if (result.rows.length > 0) {
+            const user = result.rows[0];
+
+            // Sign a JWT token using user_id and your environment secret variable
+            const token = jwt.sign(
+                { user_id: user.user_id, role: user.role },
+                process.env.JWT_SECRET || "fallback_secret_key_string",
+                { expiresIn: "24h" }
+            );
+
             res.json({
                 message: "Login successful from database!",
-                user: result.rows[0]
+                token: token, // Sent back to prevent frontend identification failures
+                user: user
             });
         } else {
             res.status(401).json({ message: "Invalid email or password credentials" });
