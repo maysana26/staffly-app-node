@@ -7,21 +7,22 @@ const db = require("./config/db.js");
 // Import separate route modules
 const adminRoutes = require("./routes/AdminRoutes");
 const applicantRoutes = require("./routes/ApplicantRoutes");
+const eventRoutes = require("./routes/EventRoutes");
 
-const app = express();//essential to read data sent from react components or postman
+const app = express();
 
 // Middleware loaders
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => {// Base status verification endpoint
-
+app.get("/", (req, res) => {
     res.send("Staffly Backend is running.");
 });
 
 // Mounting the specific role sub-route groupings
-app.use("/api/admin", adminRoutes);
+if (adminRoutes) app.use("/api/admin", adminRoutes);
 app.use("/api/applicant", applicantRoutes);
+app.use("/api/events", eventRoutes);
 
 // Fallback Route for non-existent endpoint handles
 app.use((req, res) => {
@@ -33,4 +34,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
-
