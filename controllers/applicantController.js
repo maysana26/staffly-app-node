@@ -4,25 +4,94 @@ const db = require("../config/db");
 const jwt = require("jsonwebtoken");
 
 // 1. Explore Available Event Roles
+
 const getExploreEvents = async (req, res) => {
+
     console.log("EXPLORE EVENTS ROUTE HIT");
+
     try {
+
         const result = await db.query(`
-            SELECT e.event_id, e.title, e.location, e.date,
-                   er.role_id, er.role_name,
-                   er.slots_needed, er.slots_filled
+
+            SELECT
+
+                e.event_id,
+
+                e.title,
+
+                e.location,
+
+                e.date,
+
+                e.category,
+
+                e.description,
+
+                e.image_url,
+ 
+                er.role_id,
+
+                er.role_name,
+
+
+                er.slots_needed,
+ 
+                COALESCE(er.slots_filled, 0) AS slots_filled,
+ 
+                (
+
+                    er.slots_needed -
+
+                    COALESCE(er.slots_filled, 0)
+
+                ) AS remaining_slots
+ 
             FROM events e
-            JOIN event_roles er ON e.event_id = er.event_id
-            WHERE er.slots_filled < er.slots_needed
-            AND e.date > NOW()
+ 
+            JOIN event_roles er
+
+                ON e.event_id = er.event_id
+ 
+            WHERE
+
+                COALESCE(er.slots_filled, 0) < er.slots_needed
+
+                AND e.date >= CURRENT_DATE
+ 
+            ORDER BY e.date ASC, e.event_id ASC
+
         `);
-        console.log("ROWS:", result.rows.length);
-        res.json(result.rows);
+
+        console.log("EXPLORE EVENT ROWS:", result.rows.length);
+
+        console.log(result.rows);
+
+        return res.json(result.rows);
+
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "Server error exploring events" });
+
+        console.error("Explore events error:", {
+
+            message: err.message,
+
+            code: err.code,
+
+            detail: err.detail
+
+        });
+
+        return res.status(500).json({
+
+            message: "Server error exploring events",
+
+            detail: err.message
+
+        });
+
     }
+
 };
+
 
 // 2. Register / Apply for a specific Role Slot with automatic capacity tracking
 const registerForEvent = async (req, res) => {
@@ -100,78 +169,272 @@ const getMyEvents = async (req, res) => {
         res.status(500).json({ message: "Server error fetching registered events" });
     }
 };
-
 // 4. Fetch Profile Page Info
+
 const getProfile = async (req, res) => {
+
     const email = req.query.email;
+
+    if (!email) {
+
+        return res.status(400).json({
+
+            message: "Email is required."
+
+        });
+
+    }
+
     try {
+
         const userResult = await db.query(
-            "SELECT user_id, name, email, role, rating, total_events, member_since, about, skills FROM users WHERE email = $1",
+
+            `
+
+                SELECT
+
+                    user_id,
+
+                    name,
+
+                    email,
+
+                    role,
+
+                    rating,
+
+                    member_since,
+
+                    about,
+
+                    skills
+
+                FROM users
+
+                WHERE email = $1
+
+            `,
+
             [email]
+
         );
 
         if (userResult.rows.length === 0) {
-            return res.status(404).json({ message: "Profile not found" });
+
+            return res.status(404).json({
+
+                message: "Profile not found"
+
+            });
+
         }
 
         const user = userResult.rows[0];
 
         let parsedSkills = [];
+
         if (user.skills) {
+
             if (Array.isArray(user.skills)) {
+
                 parsedSkills = user.skills;
-            } else if (typeof user.skills === 'string') {
-                parsedSkills = user.skills.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+            } else if (typeof user.skills === "string") {
+
+                parsedSkills = user.skills
+
+                    .split(",")
+
+                    .map((skill) => skill.trim())
+
+                    .filter((skill) => skill.length > 0);
+
             }
+
         }
 
+        // Count the distinct events the user registered/applied for
+
+        const totalEventsResult = await db.query(
+
+            `
+
+                SELECT
+
+                    COUNT(DISTINCT er.event_id)::INTEGER AS total_events
+
+                FROM applications a
+
+                JOIN event_roles er
+
+                    ON a.role_id = er.role_id
+
+                WHERE a.applicant_id = $1
+
+            `,
+
+            [user.user_id]
+
+        );
+
+        const totalEvents =
+
+            totalEventsResult.rows[0]?.total_events || 0;
+
         const expQuery = `
-            SELECT f.feedback_id AS id, e.title, er.role_name AS role, 
-                   TO_CHAR(e.date, 'YYYY-MM-DD') AS date, f.rating_score AS rating
+
+            SELECT
+
+                f.feedback_id AS id,
+
+                e.title,
+
+                er.role_name AS role,
+
+                TO_CHAR(e.date, 'YYYY-MM-DD') AS date,
+
+                f.rating_score AS rating
+
             FROM feedback f
-            JOIN events e ON f.event_id = e.event_id
-            JOIN applications a ON f.applicant_id = a.applicant_id
-            JOIN event_roles er ON a.role_id = er.role_id
+
+            JOIN events e
+
+                ON f.event_id = e.event_id
+
+            JOIN applications a
+
+                ON f.applicant_id = a.applicant_id
+
+            JOIN event_roles er
+
+                ON a.role_id = er.role_id
+
+                AND er.event_id = e.event_id
+
             WHERE f.applicant_id = $1
+
         `;
-        const expResult = await db.query(expQuery, [user.user_id]);
+
+        const expResult = await db.query(
+
+            expQuery,
+
+            [user.user_id]
+
+        );
 
         const eventsQuery = `
-            SELECT 
-                a.application_id AS id, 
-                e.title, 
-                a.status, 
-                er.role_name AS role, 
-                e.location, 
+
+            SELECT
+
+                a.application_id AS id,
+
+                e.event_id,
+
+                e.title,
+
+                a.status,
+
+                er.role_name AS role,
+
+                e.location,
+
                 TO_CHAR(e.date, 'YYYY-MM-DD') AS date,
-                'General' AS category,  
-                'All Day' AS time      
+
+                e.category,
+
+                COALESCE(
+
+                    TO_CHAR(e.date, 'HH24:MI'),
+
+                    'All Day'
+
+                ) AS time
+
             FROM applications a
-            JOIN event_roles er ON a.role_id = er.role_id
-            JOIN events e ON er.event_id = e.event_id
+
+            JOIN event_roles er
+
+                ON a.role_id = er.role_id
+
+            JOIN events e
+
+                ON er.event_id = e.event_id
+
             WHERE a.applicant_id = $1
+
+            ORDER BY e.date ASC
+
         `;
-        const eventsResult = await db.query(eventsQuery, [user.user_id]);
+
+        const eventsResult = await db.query(
+
+            eventsQuery,
+
+            [user.user_id]
+
+        );
 
         const completedProfilePayload = {
+
             user_id: user.user_id,
+
             name: user.name,
+
             email: user.email,
+
             role: user.role,
+
             rating: user.rating,
-            total_events: user.total_events || 0,
-            member_since: user.member_since ? String(user.member_since) : "2026",
+
+            total_events: totalEvents,
+
+            member_since: user.member_since
+
+                ? String(user.member_since)
+
+                : "2026",
+
             about: user.about || "",
+
             skills: parsedSkills,
+
             experience: expResult.rows || [],
+
             registeredEvents: eventsResult.rows || []
+
         };
 
-        res.json(completedProfilePayload);
+        return res.json(completedProfilePayload);
+
     } catch (err) {
-        console.error("Profile payload crash detailed logs:", err.message);
-        res.status(500).json({ message: "Server error fetching profile" });
+
+        console.error(
+
+            "Profile payload crash detailed logs:",
+
+            {
+
+                message: err.message,
+
+                code: err.code,
+
+                detail: err.detail
+
+            }
+
+        );
+
+        return res.status(500).json({
+
+            message: "Server error fetching profile",
+
+            detail: err.message
+
+        });
+
     }
+
 };
 
 // 4.5 Update Profile Data Row

@@ -10,59 +10,79 @@ Unlike traditional job boards, Staffly treats event posts as dynamic containers 
 
 * **Runtime Environment:** Node.js
 * **Framework:** Express.js
-* **Database:** PostgreSQL (Relational Database)
+* **Database:** PostgreSQL
 * **Database Driver:** pg (Connection Pooling)
+* **Authentication:** JWT-Based Authentication
+* **API Style:** RESTful Architecture
 
 ---
 
 # ⚙️ Core Architectural Features
 
-### **1. Dynamic Capacity Logic**
+### 1. Dynamic Capacity Management
 
-Event containers manage role-specific staffing demands, ensuring that each role is filled only up to its required capacity (e.g., exactly 3 cleaners, 2 lighting managers, etc.).
+Role-specific staffing requirements are automatically tracked through database counters. Applications are only accepted while capacity remains available.
 
-### **2. 48-Hour Lock-In Enforcement**
+### 2. Event Registration Infrastructure
 
-Database-level date calculations automatically prevent applicants from canceling registered shifts when the event start time is less than 48 hours away.
+Applicants can register for available event roles while the system prevents duplicate registrations and overbooking.
 
-### **3. Administrative Evaluation Infrastructure**
+### 3. Administrative Event Management
 
-Built-in functionality allows administrators to record post-event performance evaluations, including:
+Administrators can create, edit, delete, and monitor events through protected API endpoints.
 
-* Star ratings (out of 5)
-* Performance feedback comments
-* Point and ranking updates
+### 4. Applicant Profile Management
+
+Applicants can maintain profile information, skills, and personal details through dedicated profile endpoints.
+
+### 5. Real-Time Weather Integration
+
+Event-specific weather information can be retrieved dynamically to provide additional context for applicants before registration.
+
+### 6. Application Tracking System
+
+Applicants and administrators can monitor application statuses and staffing progress throughout the event lifecycle.
 
 ---
 
 # 🚀 Local Installation & Setup
 
-### **1. Clone the Repository**
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/maysana26/staffly-app-node.git
 cd staffly-app-node
 ```
 
-### **2. Install Project Dependencies**
+### 2. Install Dependencies
 
 ```bash
 npm install
 ```
 
-### **3. Configure Environment Variables**
+### 3. Configure Environment Variables
 
-Create a `.env` file in the project root directory.
+Create a `.env` file in the project root.
 
-Use the configuration keys provided in `.env.example` and supply the appropriate values for your environment.
+Example:
 
-### **4. Start the Server**
+```env
+PORT=5000
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=staffly
+DB_USER=postgres
+DB_PASSWORD=yourpassword
+JWT_SECRET=your_secret_key
+```
+
+### 4. Start the Server
 
 ```bash
 node server.js
 ```
 
-The backend server should now be running locally and ready to accept API requests.
+The backend server should now be running locally and ready to process API requests.
 
 ---
 
@@ -70,106 +90,267 @@ The backend server should now be running locally and ready to accept API request
 
 ## 🔐 Authentication Module
 
-### **POST /api/applicant/signup**
+### POST /api/applicant/signup
 
-Registers a new user account (Admin or Applicant) and stores it permanently in the database.
+Creates a new user account and stores user information in the database.
 
-### **POST /api/applicant/login**
+**Request Type:** POST
 
-Authenticates user credentials and returns the appropriate access response.
+**Purpose:**
 
----
-
-## 💼 Admin Management Module
-
-**Requires:** `user-role: admin` request header
-
-### **GET /api/admin/dashboard-stats**
-
-Retrieves dashboard analytics, workspace statistics, and recent activity summaries.
-
-### **GET /api/admin/events**
-
-Returns a list of all created event containers.
-
-### **POST /api/admin/create-event**
-
-Creates a new event and its associated operational requirements.
-
-### **PUT /api/admin/edit-event/:id**
-
-Updates event details and logistics using contextual fallback values where necessary.
-
-### **GET /api/admin/applications**
-
-Retrieves all submitted applicant registrations across managed events.
+* Register new Applicants
+* Register new Admins
 
 ---
 
-## 🏃 Applicant Module
+### POST /api/applicant/login
 
-### **GET /api/applicant/explore-events**
+Authenticates user credentials and grants access to the platform.
 
-Returns a public feed of upcoming events and available staffing roles with vacancy validation.
+**Request Type:** POST
 
-### **POST /api/applicant/register**
+**Purpose:**
 
-Submits an application for a selected role while preventing duplicate registrations.
+* User authentication
+* JWT token generation
 
-### **GET /api/applicant/myevents**
+---
 
-Returns all registered shifts for the authenticated applicant, including real-time cancellation eligibility (`canCancel`).
+# 🏃 Applicant Module
 
-### **GET /api/applicant/profile**
+## GET /api/applicant/explore-events
 
-Retrieves applicant profile information, skills, accumulated points, rankings, and performance history.
+Returns all available events and staffing opportunities visible to applicants.
 
-### **POST /api/applicant/feedback**
+**Request Type:** GET
 
-Stores administrator-generated performance ratings and review comments for applicants.
+---
+
+## GET /api/applicant/events/:eventId
+
+Retrieves detailed information for a specific event.
+
+**Request Type:** GET
+
+---
+
+## GET /api/applicant/events/:eventId/weather
+
+Returns weather information associated with a selected event.
+
+**Request Type:** GET
+
+---
+
+## POST /api/applicant/register
+
+Registers an applicant for a selected event role.
+
+**Request Type:** POST
+
+**Business Rules:**
+
+* Prevent duplicate registrations
+* Validate role capacity
+* Update staffing counters
+
+---
+
+## GET /api/applicant/myevents
+
+Returns all event applications associated with the authenticated applicant.
+
+**Request Type:** GET
+
+---
+
+## DELETE /api/applicant/my-applications/:id
+
+Removes a submitted application from the system.
+
+**Request Type:** DELETE
+
+**Purpose:**
+
+* Application withdrawal
+* Database record removal
+
+---
+
+## GET /api/applicant/profile
+
+Retrieves applicant profile information.
+
+**Request Type:** GET
+
+---
+
+## PUT /api/applicant/profile/update
+
+Updates applicant profile information.
+
+**Request Type:** PUT
+
+---
+
+## POST /api/applicant/feedback
+
+Stores feedback, ratings, and evaluation information.
+
+**Request Type:** POST
+
+---
+
+# 💼 Admin Module
+
+> All admin endpoints require administrative authorization middleware.
+
+---
+
+## GET /api/admin/dashboard-stats
+
+Returns dashboard statistics and platform analytics.
+
+**Request Type:** GET
+
+---
+
+## GET /api/admin/summary
+
+Alternative dashboard analytics endpoint.
+
+**Request Type:** GET
+
+---
+
+## GET /api/admin/events
+
+Retrieves all events managed within the system.
+
+**Request Type:** GET
+
+---
+
+## POST /api/admin/events
+
+Creates a new event.
+
+**Request Type:** POST
+
+---
+
+## POST /api/admin/create-event
+
+Alternative event creation endpoint.
+
+**Request Type:** POST
+
+---
+
+## PUT /api/admin/events/:id
+
+Updates an existing event.
+
+**Request Type:** PUT
+
+---
+
+## PUT /api/admin/edit-event/:id
+
+Alternative event update endpoint.
+
+**Request Type:** PUT
+
+---
+
+## DELETE /api/admin/events/:id
+
+Deletes an event from the system.
+
+**Request Type:** DELETE
+
+---
+
+## GET /api/admin/events/:id/details
+
+Returns detailed event information including staffing statistics and registration data.
+
+**Request Type:** GET
+
+---
+
+## GET /api/admin/applications
+
+Retrieves all submitted applications.
+
+**Request Type:** GET
+
+---
+
+## PUT /api/admin/applications/:id/status
+
+Updates application approval status.
+
+**Request Type:** PUT
+
+**Possible Status Values:**
+
+* Pending
+* Approved
+* Rejected
 
 ---
 
 # 📌 Business Rules
 
-### **Capacity Enforcement**
+### Capacity Enforcement
 
-Applicants cannot register for roles that have already reached their maximum staffing capacity.
+Applicants cannot register for roles that have already reached their staffing limit.
 
-### **Duplicate Registration Protection**
+### Duplicate Registration Prevention
 
-Applicants cannot register multiple times for the same role within the same event.
+An applicant cannot register more than once for the same role.
 
-### **48-Hour Cancellation Restriction**
+### Protected Administrative Access
 
-Applicants are prevented from canceling a shift if the event begins within 48 hours.
+Administrative functionality is protected using middleware authorization checks.
 
-### **Performance Tracking**
+### Dynamic Staffing Updates
 
-Administrators can evaluate applicants after event completion using ratings, comments, and point-based assessments.
+Role capacity counters are automatically updated whenever registrations occur.
+
+### Data Integrity Protection
+
+Database transactions ensure consistency when creating applications and updating staffing counts.
 
 ---
 
 # 👥 User Roles
 
-## **Admin**
+## Admin
 
-* Create and manage events
-* Monitor applications
-* Review staffing requirements
-* Evaluate applicant performance
-* Access administrative analytics
+* Create events
+* Edit events
+* Delete events
+* Review applications
+* Update application statuses
+* Access dashboard analytics
+* Monitor staffing requirements
 
-## **Applicant**
+---
 
-* Explore available events
-* Register for staffing roles
-* View registered shifts
-* Manage profile information
-* Receive ratings and feedback
+## Applicant
+
+* Create accounts
+* Browse events
+* Register for event roles
+* View registered events
+* Update profile information
+* Submit and receive feedback
+* Withdraw applications
 
 ---
 
 # 📄 License
 
-This project is intended for educational and academic purposes.
+This project was developed for educational and academic purposes.

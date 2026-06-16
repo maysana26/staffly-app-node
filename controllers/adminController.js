@@ -223,9 +223,6 @@ const getAdminEvents = async (req, res) => {
     }
 
 };
-
-// 3. Create Event
-
 const createEvent = async (req, res) => {
 
     const {
@@ -238,7 +235,11 @@ const createEvent = async (req, res) => {
 
         category,
 
-        description
+        description,
+
+        imageUrl,
+
+        roles
 
     } = req.body;
 
@@ -252,31 +253,17 @@ const createEvent = async (req, res) => {
 
     }
 
+    if (!Array.isArray(roles) || roles.length === 0) {
+
+        return res.status(400).json({
+
+            message: "At least one role is required."
+
+        });
+
+    }
+
     try {
-
-        const queryText = `
-
-            INSERT INTO events (
-
-                title,
-
-                location,
-
-                date,
-
-                category,
-
-                description,
-
-                created_by
-
-            )
-
-            VALUES ($1, $2, $3, $4, $5, $6)
-
-            RETURNING *
-
-        `;
 
         const createdBy =
 
@@ -286,27 +273,113 @@ const createEvent = async (req, res) => {
 
             1;
 
-        const result = await db.query(queryText, [
+        const eventResult = await db.query(
 
-            title.trim(),
+            `
 
-            location.trim(),
+                INSERT INTO events (
 
-            date,
+                    title,
 
-            category || "General",
+                    location,
 
-            description || "",
+                    date,
 
-            createdBy
+                    category,
 
-        ]);
+                    description,
+
+                    image_url,
+
+                    created_by
+
+                )
+
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+
+                RETURNING *
+
+            `,
+
+            [
+
+                title.trim(),
+
+                location.trim(),
+
+                date,
+
+                category || "General",
+
+                description || "",
+
+                imageUrl?.trim() || null,
+
+                createdBy
+
+            ]
+
+        );
+
+        const createdEvent = eventResult.rows[0];
+
+        const createdRoles = [];
+
+        for (const role of roles) {
+
+            if (!role.name || !role.name.trim()) {
+
+                continue;
+
+            }
+
+            const roleResult = await db.query(
+
+                `
+
+                    INSERT INTO event_roles (
+
+                        event_id,
+
+                        role_name,
+
+                        slots_needed,
+
+                        slots_filled
+
+                    )
+
+                    VALUES ($1, $2, $3, $4)
+
+                    RETURNING *
+
+                `,
+
+                [
+
+                    createdEvent.event_id,
+
+                    role.name.trim(),
+
+                    Number(role.slots) || 1,
+
+                    0
+
+                ]
+
+            );
+
+            createdRoles.push(roleResult.rows[0]);
+
+        }
 
         return res.status(201).json({
 
-            message: "Event created successfully in database!",
+            message: "Event and roles created successfully.",
 
-            event: result.rows[0]
+            event: createdEvent,
+
+            roles: createdRoles
 
         });
 
@@ -333,6 +406,7 @@ const createEvent = async (req, res) => {
     }
 
 };
+
 
 // 4. Edit Event
 
