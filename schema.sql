@@ -10,7 +10,7 @@ create table users (
    total_events int default 0,
    member_since timestamp default current_timestamp,
    about        text,
-   skills       text  -- PostgreSQL Array type to cleanly store multiple skill tags
+   skills       text -- PostgreSQL Array type to cleanly store multiple skill tags
 );
 
 
