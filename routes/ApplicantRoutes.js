@@ -17,6 +17,7 @@ router.get("/myevents", applicantController.getMyEvents);
 router.get("/profile", applicantController.getProfile);
 router.put("/profile/update", applicantController.updateProfile);
 router.post("/feedback", applicantController.submitFeedback);
+router.get("/events/:eventId/weather", applicantController.getEventWeather);
 router.get("/events/:eventId", applicantController.getEventById);
 
 // Private Cancellation Handler Endpoint

@@ -1,5 +1,7 @@
+// console.log("APPLICANT CONTROLLER LOADED");
+
 const db = require("../config/db");
-console.log("APPLICANT CONTROLLER LOADED");
+const jwt = require("jsonwebtoken");
 
 // 1. Explore Available Event Roles
 const getExploreEvents = async (req, res) => {
@@ -173,47 +175,123 @@ const getProfile = async (req, res) => {
 };
 
 // 4.5 Update Profile Data Row
+// 4.5 Update Profile Data Row
 const updateProfile = async (req, res) => {
-    let { email, about, skills } = req.body;
+    const { about, skills } = req.body;
+
     try {
-        if (!email && req.headers.authorization) {
-            const token = req.headers.authorization.split(" ")[1];
-            const base64Url = token.split('.')[1];
-            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            const decodedToken = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
-            email = decodedToken.email;
+        console.log("PROFILE UPDATE ROUTE HIT");
+        console.log("PROFILE UPDATE BODY:", {
+            about,
+            skills,
+            skillsType: Array.isArray(skills) ? "array" : typeof skills,
+        });
+
+        const authHeader = req.headers.authorization;
+
+        console.log("PROFILE UPDATE AUTH HEADER EXISTS:", !!authHeader);
+        console.log(
+            "PROFILE UPDATE AUTH HEADER PREFIX:",
+            authHeader ? authHeader.slice(0, 20) : null
+        );
+
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({
+                message: "Login token missing. Please log in again."
+            });
         }
 
-        if (!email) {
-            return res.status(400).json({ message: "Identification error: Profile account email reference missing." });
+        const token = authHeader.split(" ")[1];
+
+        const decodedToken = jwt.verify(
+            token,
+            process.env.JWT_SECRET || "fallback_secret_key_string"
+        );
+
+        const userId = decodedToken.user_id;
+
+        console.log("PROFILE UPDATE DECODED TOKEN:", {
+            user_id: decodedToken.user_id,
+            role: decodedToken.role,
+            exp: decodedToken.exp,
+        });
+
+        if (!userId) {
+            return res.status(401).json({
+                message: "Login token is missing the user account ID."
+            });
         }
 
-        const structuralSkillsString = Array.isArray(skills) ? skills.join(", ") : skills;
+        const structuralSkillsValue = Array.isArray(skills)
+            ? skills
+            : String(skills || "")
+                .split(",")
+                .map((skill) => skill.trim())
+                .filter((skill) => skill.length > 0);
+
+        console.log("PROFILE UPDATE DB VALUES:", {
+            userId,
+            aboutLength: about ? about.length : 0,
+            structuralSkillsValue,
+        });
 
         const updateQuery = `
-            UPDATE users 
-            SET about = $1, skills = $2 
-            WHERE email = $3 
-            RETURNING about, skills
+            UPDATE users
+            SET about = $1, skills = $2
+            WHERE user_id = $3
+            RETURNING user_id, email, about, skills
         `;
-        const result = await db.query(updateQuery, [about, structuralSkillsString, email]);
+
+        const result = await db.query(updateQuery, [
+            about,
+            structuralSkillsValue,
+            userId
+        ]);
+
+        console.log("PROFILE UPDATE ROW COUNT:", result.rows.length);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "User profile registry row missing." });
+            return res.status(404).json({
+                message: "User profile registry row missing."
+            });
         }
 
         let responseSkills = [];
-        if (result.rows[0].skills) {
-            responseSkills = result.rows[0].skills.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+        if (Array.isArray(result.rows[0].skills)) {
+            responseSkills = result.rows[0].skills;
+        } else if (result.rows[0].skills) {
+            responseSkills = String(result.rows[0].skills)
+                .split(",")
+                .map((skill) => skill.trim())
+                .filter((skill) => skill.length > 0);
         }
 
         res.json({
+            user_id: result.rows[0].user_id,
+            email: result.rows[0].email,
             about: result.rows[0].about || "",
             skills: responseSkills
         });
     } catch (err) {
-        console.error("Profile saving operational breakdown:", err.message);
-        res.status(500).json({ message: "Server breakdown saving user profile elements." });
+        if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
+            console.error("PROFILE UPDATE TOKEN ERROR:", err);
+
+            return res.status(401).json({
+                message: "Login token is invalid or expired. Please log in again.",
+                detail: err.message,
+                errorName: err.name
+            });
+        }
+
+        console.error("FULL PROFILE UPDATE ERROR:", err);
+
+        res.status(500).json({
+            message: "Server breakdown saving user profile elements.",
+            detail: err.message,
+            code: err.code,
+            errorName: err.name
+        });
     }
 };
 
@@ -256,6 +334,170 @@ const getEventById = async (req, res) => {
         res.status(500).json({ message: "Server error fetching event" });
     }
 };
+const getEventWeather = async (req, res) => {
+    const eventId = req.params.eventId;
+
+    try {
+        if (typeof fetch !== "function") {
+            return res.status(500).json({
+                message: "Weather lookup requires Node.js 18 or newer because it uses the built-in fetch API."
+            });
+        }
+
+        const eventResult = await db.query(
+            `SELECT event_id, title, location, TO_CHAR(date, 'YYYY-MM-DD') AS event_date
+             FROM events
+             WHERE event_id = $1`,
+            [eventId]
+        );
+
+        if (eventResult.rows.length === 0) {
+            return res.status(404).json({ message: "Event not found" });
+        }
+
+        const event = eventResult.rows[0];
+
+        if (!event.location || !event.event_date) {
+            return res.status(400).json({
+                message: "Event location or date is missing, so weather cannot be loaded."
+            });
+        }
+
+        let place = null;
+
+        const nominatimUrl =
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(event.location)}` +
+            "&format=json&limit=1&addressdetails=1";
+
+        const nominatimResponse = await fetch(nominatimUrl, {
+            headers: {
+                "User-Agent": "Staffly event weather lookup"
+            }
+        });
+
+        const nominatimData = await nominatimResponse.json();
+
+        if (
+            nominatimResponse.ok &&
+            Array.isArray(nominatimData) &&
+            nominatimData.length > 0
+        ) {
+            const locationMatch = nominatimData[0];
+
+            place = {
+                name: locationMatch.display_name,
+                country: locationMatch.address?.country,
+                latitude: Number(locationMatch.lat),
+                longitude: Number(locationMatch.lon),
+                timezone: "auto",
+                provider: "OpenStreetMap Nominatim"
+            };
+        }
+
+        if (!place) {
+            const geocodeUrl =
+                `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(event.location)}` +
+                "&count=1&language=en&format=json";
+
+            const geocodeResponse = await fetch(geocodeUrl);
+            const geocodeData = await geocodeResponse.json();
+
+            if (
+                geocodeResponse.ok &&
+                geocodeData.results &&
+                geocodeData.results.length > 0
+            ) {
+                const locationMatch = geocodeData.results[0];
+
+                place = {
+                    name: locationMatch.name,
+                    country: locationMatch.country,
+                    latitude: locationMatch.latitude,
+                    longitude: locationMatch.longitude,
+                    timezone: locationMatch.timezone || "auto",
+                    provider: "Open-Meteo Geocoding"
+                };
+            }
+        }
+
+        if (!place) {
+            return res.status(404).json({
+                message: "Weather location could not be found. Try a format like 'Khalda, Amman, Jordan'.",
+                location: event.location
+            });
+        }
+
+        const timezone = place.timezone || "auto";
+
+        const forecastUrl =
+            `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}` +
+            "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,wind_speed_10m_max" +
+            `&timezone=${encodeURIComponent(timezone)}`;
+
+        const forecastResponse = await fetch(forecastUrl);
+        const forecastData = await forecastResponse.json();
+
+        if (!forecastResponse.ok || !forecastData.daily) {
+            return res.status(502).json({
+                message: "Weather forecast could not be loaded.",
+                weatherApiResponse: forecastData
+            });
+        }
+
+        const dayIndex = forecastData.daily.time.findIndex(
+            (date) => date === event.event_date
+        );
+
+        if (dayIndex === -1) {
+            return res.status(404).json({
+                message: "Weather forecast is only available for nearby upcoming dates.",
+                eventDate: event.event_date,
+                availableDates: forecastData.daily.time
+            });
+        }
+
+        res.json({
+            event: {
+                event_id: event.event_id,
+                title: event.title,
+                location: event.location,
+                date: event.event_date
+            },
+            resolvedLocation: {
+                name: place.name,
+                country: place.country,
+                latitude: place.latitude,
+                longitude: place.longitude,
+                timezone,
+                provider: place.provider
+            },
+            units: {
+                maxTemp: forecastData.daily_units?.temperature_2m_max,
+                minTemp: forecastData.daily_units?.temperature_2m_min,
+                rainChance: forecastData.daily_units?.precipitation_probability_max,
+                windSpeed: forecastData.daily_units?.wind_speed_10m_max,
+                weatherCode: forecastData.daily_units?.weather_code
+            },
+            weather: {
+                date: forecastData.daily.time[dayIndex],
+                maxTemp: forecastData.daily.temperature_2m_max?.[dayIndex],
+                minTemp: forecastData.daily.temperature_2m_min?.[dayIndex],
+                rainChance: forecastData.daily.precipitation_probability_max?.[dayIndex],
+                windSpeed: forecastData.daily.wind_speed_10m_max?.[dayIndex],
+                weatherCode: forecastData.daily.weather_code?.[dayIndex]
+            },
+            source: "Open-Meteo"
+        });
+    } catch (err) {
+        console.error("Event weather lookup failed:", err);
+
+        res.status(500).json({
+            message: "Server error loading event weather.",
+            detail: err.message
+        });
+    }
+};
+
 
 module.exports = {
     getExploreEvents,
@@ -264,5 +506,6 @@ module.exports = {
     getProfile,
     updateProfile,
     submitFeedback,
-    getEventById
+    getEventById,
+    getEventWeather
 };
