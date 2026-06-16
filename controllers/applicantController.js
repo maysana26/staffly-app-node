@@ -6,13 +6,20 @@ const getExploreEvents = async (req, res) => {
     console.log("EXPLORE EVENTS ROUTE HIT");
     try {
         const result = await db.query(`
-            SELECT e.event_id, e.title, e.location, e.date,
+            SELECT e.event_id,
+                   e.title,
+                   e.location,
+                   TO_CHAR(e.date, 'YYYY-MM-DD') AS date,
+                   e.category,
+                   e.description,
+                   '/event-placeholder.jpg' AS image,
                    er.role_id, er.role_name,
                    er.slots_needed, er.slots_filled
             FROM events e
             JOIN event_roles er ON e.event_id = er.event_id
             WHERE er.slots_filled < er.slots_needed
             AND e.date > NOW()
+            ORDER BY e.date ASC, e.title ASC, er.role_name ASC
         `);
         console.log("ROWS:", result.rows.length);
         res.json(result.rows);
@@ -30,23 +37,25 @@ const registerForEvent = async (req, res) => {
         return res.status(400).json({ message: "Missing required roleId or applicantId credentials." });
     }
 
+    let client;
     try {
-        await db.query("BEGIN");
+        client = await db.getClient();
+        await client.query("BEGIN");
 
         // Check if capacity is already exhausted
-        const capacityCheck = await db.query(
+        const capacityCheck = await client.query(
             "SELECT slots_filled, slots_needed FROM event_roles WHERE role_id = $1 FOR UPDATE",
             [roleId]
         );
 
         if (capacityCheck.rows.length === 0) {
-            await db.query("ROLLBACK");
+            await client.query("ROLLBACK");
             return res.status(404).json({ message: "Target role layout structure not found." });
         }
 
         const { slots_filled, slots_needed } = capacityCheck.rows[0];
         if (slots_filled >= slots_needed) {
-            await db.query("ROLLBACK");
+            await client.query("ROLLBACK");
             return res.status(400).json({ message: "This role has already filled all its capacity!" });
         }
 
@@ -55,27 +64,33 @@ const registerForEvent = async (req, res) => {
             INSERT INTO applications (applicant_id, role_id, status)
             VALUES ($1, $2, 'Pending') RETURNING *
         `;
-        const appResult = await db.query(appQuery, [applicantId, roleId]);
+        const appResult = await client.query(appQuery, [applicantId, roleId]);
 
         // Increment dynamic structural counters inside database rows
-        await db.query(
+        await client.query(
             "UPDATE event_roles SET slots_filled = slots_filled + 1 WHERE role_id = $1",
             [roleId]
         );
 
-        await db.query("COMMIT");
+        await client.query("COMMIT");
         res.status(201).json({
             message: "Application submitted successfully to database!",
             registration: appResult.rows[0]
         });
 
     } catch (err) {
-        await db.query("ROLLBACK");
+        if (client) {
+            await client.query("ROLLBACK");
+        }
         if (err.code === '23505') {
             return res.status(400).json({ message: "You have already applied for this role slot!" });
         }
         console.error("Error during assignment execution paths:", err.message);
         res.status(500).json({ message: "Server error during role registration" });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 };
 

@@ -19,6 +19,24 @@ app.get("/", (req, res) => {
     res.send("Staffly Backend is running.");
 });
 
+app.get("/api/health/db", async (req, res) => {
+    try {
+        const result = await db.query("SELECT NOW() AS connected_at");
+        res.json({
+            status: "ok",
+            database: "connected",
+            connectedAt: result.rows[0].connected_at,
+        });
+    } catch (err) {
+        console.error("Database health check failed:", err.message);
+        res.status(503).json({
+            status: "error",
+            database: "disconnected",
+            message: "Database connection failed",
+        });
+    }
+});
+
 // Mounting the specific role sub-route groupings
 if (adminRoutes) app.use("/api/admin", adminRoutes);
 app.use("/api/applicant", applicantRoutes);
